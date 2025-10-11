@@ -1,8 +1,8 @@
-// admin can update gold/diamond pricing and all ornaments will be recalculated
+// controllers/pricingController.js
 import Pricing from "../models/Pricing.js";
 import Ornament from "../models/Ornament.js";
 
-// ✅ Update gold/diamond pricing and recalc all ornaments
+// ✅ Update gold/diamond pricing and recalc all ornaments (INR only)
 export const updatePricing = async (req, res) => {
   try {
     const { goldPricePerGram, diamondPricePerCarat } = req.body;
@@ -11,6 +11,7 @@ export const updatePricing = async (req, res) => {
       return res.status(400).json({ message: "Provide at least one price" });
     }
 
+    // 🔹 Get or create pricing
     let pricing = await Pricing.findOne();
     if (!pricing) {
       pricing = new Pricing({ goldPricePerGram, diamondPricePerCarat });
@@ -20,49 +21,60 @@ export const updatePricing = async (req, res) => {
     }
     await pricing.save();
 
-    // 🔹 Bulk update ornaments
+    // 🔹 Recalculate all ornaments — only INR price (not other currencies)
+    const bulkOps = [];
+
     if (goldPricePerGram) {
-      await Ornament.updateMany(
-        { category: "Gold" },
-        [
-          {
-            $set: {
-              price: {
-                $add: [
-                  { $multiply: ["$weight", goldPricePerGram] },
-                  "$makingCharges",
-                ],
+      const goldOrnaments = await Ornament.find({ categoryType: "Gold" });
+      goldOrnaments.forEach((item) => {
+        const newPrice = item.weight * goldPricePerGram + item.makingCharges;
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: item._id },
+            update: {
+              $set: {
+                price: newPrice,                  // update INR base price
+                originalPrice: newPrice,           // optional
+                "prices.INR.amount": newPrice,     // ✅ only update INR inside prices map
               },
             },
           },
-        ]
-      );
+        });
+      });
     }
 
     if (diamondPricePerCarat) {
-      await Ornament.updateMany(
-        { category: "Diamond" },
-        [
-          {
-            $set: {
-              price: {
-                $add: [
-                  { $multiply: ["$weight", diamondPricePerCarat] },
-                  "$makingCharges",
-                ],
+      const diamondOrnaments = await Ornament.find({ categoryType: "Diamond" });
+      diamondOrnaments.forEach((item) => {
+        const newPrice = item.weight * diamondPricePerCarat + item.makingCharges;
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: item._id },
+            update: {
+              $set: {
+                price: newPrice,
+                originalPrice: newPrice,
+                "prices.INR.amount": newPrice,     // ✅ update INR only
               },
             },
           },
-        ]
-      );
+        });
+      });
     }
 
-    res
-      .status(200)
-      .json({ message: "Pricing updated and products recalculated", pricing });
+    // 🔹 Execute all updates at once
+    if (bulkOps.length > 0) {
+      await Ornament.bulkWrite(bulkOps);
+    }
+
+    res.status(200).json({
+      message: "Pricing updated and INR prices recalculated",
+      pricing,
+    });
   } catch (err) {
-    res
-      .status(500)
-      .json({ message: "Failed to update pricing", error: err.message });
+    res.status(500).json({
+      message: "Failed to update pricing",
+      error: err.message,
+    });
   }
 };
