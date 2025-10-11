@@ -12,6 +12,12 @@ const trackingLogSchema = new mongoose.Schema({
   orderId: { type: mongoose.Schema.Types.ObjectId, ref: "UserOrder" },
   metadata: { type: Object }, // extra info (device, referrer, page, etc.)
   timestamp: { type: Date, default: Date.now },
+
+  ip: { type: String },
+  country: { type: String },
+  region: { type: String },
+  city: { type: String },
 });
 
 export default mongoose.model("TrackingLog", trackingLogSchema);
+
