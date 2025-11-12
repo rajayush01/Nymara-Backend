@@ -27,7 +27,7 @@ router.put("/pricing", protect, adminOnly, updatePricing);
 router.post("/add", protect, adminOnly, upload.any(), addOrnament);
 
 router.get("/", protect, adminOnly, getOrnaments);
-router.put("/edit/:id", protect, adminOnly, uploadOrnamentImages, updateOrnament);
+router.put("/edit/:id", protect, adminOnly, upload.any(), updateOrnament);
 router.delete("/delete/:id", protect, adminOnly, deleteOrnament);
 router.get("/:id", protect, adminOnly, getOrnamentById);
 

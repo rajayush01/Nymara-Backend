@@ -436,29 +436,55 @@ export const updateOrnament = async (req, res) => {
 
     const updateOps = { $set: { ...updateData } };
 
-    // ✅ Prices
-    if (prices) {
+    // ✅ Helper: safely parse JSON
+    const parseJSON = (val, fallback = null) => {
       try {
-        updateOps.$set.prices =
-          typeof prices === "string" ? JSON.parse(prices) : prices;
+        if (!val) return fallback;
+        if (typeof val === "object") return val;
+        return JSON.parse(val);
       } catch {
-        console.warn("⚠️ Invalid prices JSON, skipping:", prices);
+        return fallback;
       }
+    };
+
+    /* ==============================
+       🧩 VARIANT PARSING FIX
+    =============================== */
+    let parsedVariants = [];
+
+    if (variants) {
+      let temp = variants;
+
+      // Handle Array sent as ["[object Object],[object Object]"]
+      if (Array.isArray(temp)) temp = temp.join(",");
+
+      // Fix common malformed cases
+      if (typeof temp === "string" && temp.includes("[object Object]")) {
+        console.warn("⚠️ Received malformed variants string — auto-fixing...");
+        temp = "[]"; // fallback to empty
+      }
+
+      // Try normal parsing
+      let parsed = parseJSON(temp, []);
+      // Handle weird nested array (e.g. [[{},{},...]])
+      if (Array.isArray(parsed) && Array.isArray(parsed[0])) {
+        parsed = parsed[0];
+      }
+
+      parsedVariants = Array.isArray(parsed) ? parsed : [];
     }
 
-    // ✅ Making charges
-    if (makingChargesByCountry) {
-      try {
-        updateOps.$set.makingChargesByCountry =
-          typeof makingChargesByCountry === "string"
-            ? JSON.parse(makingChargesByCountry)
-            : makingChargesByCountry;
-      } catch {
-        console.warn("⚠️ Invalid makingChargesByCountry JSON, skipping");
-      }
-    }
+    /* ==============================
+       💰 PRICES & MAKING CHARGES
+    =============================== */
+    const parsedPrices = parseJSON(prices);
+    const parsedCharges = parseJSON(makingChargesByCountry);
+    if (parsedPrices) updateOps.$set.prices = parsedPrices;
+    if (parsedCharges) updateOps.$set.makingChargesByCountry = parsedCharges;
 
-    // ✅ Handle main images
+    /* ==============================
+       🖼️ COVER & GALLERY IMAGES
+    =============================== */
     if (req.files?.coverImage?.[0]) {
       updateOps.$set.coverImage = req.files.coverImage[0].path;
     }
@@ -467,41 +493,69 @@ export const updateOrnament = async (req, res) => {
     }
     if (images) updateOps.$set.images = images;
 
-    // ✅ Add/remove specific images
-    if (addImage) updateOps.$push = { ...(updateOps.$push || {}), images: addImage };
-    if (removeImage) updateOps.$pull = { ...(updateOps.$pull || {}), images: removeImage };
+    // Add/remove specific images
+    if (addImage)
+      updateOps.$push = { ...(updateOps.$push || {}), images: addImage };
+    if (removeImage)
+      updateOps.$pull = { ...(updateOps.$pull || {}), images: removeImage };
 
-    // ✅ Handle variants (embedded)
-    if (variants) {
-      try {
-        const parsedVariants =
-          typeof variants === "string" ? JSON.parse(variants) : variants;
-        updateOps.$set.variants = parsedVariants;
-      } catch (err) {
-        console.warn("⚠️ Invalid variants JSON, skipping:", variants);
+    /* ==============================
+       🧩 VARIANT FILE UPLOADS
+    =============================== */
+    const variantFiles = {};
+    if (Array.isArray(req.files)) {
+      for (const file of req.files) {
+        if (/^variant\d+_(cover|images)$/.test(file.fieldname)) {
+          const match = file.fieldname.match(/^variant(\d+)_(cover|images)$/);
+          const variantIndex = match[1];
+          const type = match[2];
+          if (!variantFiles[variantIndex])
+            variantFiles[variantIndex] = { images: [] };
+          if (type === "cover") variantFiles[variantIndex].coverImage = file.path;
+          else variantFiles[variantIndex].images.push(file.path);
+        }
       }
     }
 
-    // ✅ VariantLinks (legacy compatibility)
-    if (variantLinks) {
-      try {
-        updateOps.$set.variantLinks =
-          typeof variantLinks === "string"
-            ? JSON.parse(variantLinks)
-            : variantLinks;
-      } catch {
-        console.warn("⚠️ Invalid variantLinks JSON, skipping:", variantLinks);
-      }
+    // ✅ Merge variant uploads with parsed variants
+    if (parsedVariants.length && Object.keys(variantFiles).length) {
+      parsedVariants.forEach((variant, i) => {
+        if (typeof variant !== "object" || variant === null) {
+          console.warn(`⚠️ Skipping malformed variant at index ${i}`);
+          return;
+        }
+
+        if (variantFiles[i]) {
+          variant.coverImage =
+            variantFiles[i].coverImage || variant.coverImage || null;
+          variant.images = [
+            ...(variant.images || []),
+            ...(variantFiles[i].images || []),
+          ];
+        }
+      });
     }
 
-    // ✅ Price conversions
+    if (parsedVariants.length) {
+      updateOps.$set.variants = parsedVariants;
+    }
+
+    /* ==============================
+       🔗 VARIANT LINKS
+    =============================== */
+    const parsedVariantLinks = parseJSON(variantLinks);
+    if (parsedVariantLinks) updateOps.$set.variantLinks = parsedVariantLinks;
+
+    /* ==============================
+       💲 NUMERIC FIELDS
+    =============================== */
     if (updateData.price) updateOps.$set.price = Number(updateData.price);
     if (updateData.originalPrice)
       updateOps.$set.originalPrice = Number(updateData.originalPrice);
     if (updateData.discount)
       updateOps.$set.discount = Number(updateData.discount);
 
-    // ✅ Auto discount
+    // Auto discount
     const { price, originalPrice, discount } = updateOps.$set;
     if (!discount && price && originalPrice && originalPrice > price) {
       updateOps.$set.discount = Math.round(
@@ -509,28 +563,14 @@ export const updateOrnament = async (req, res) => {
       );
     }
 
-    // ✅ Diamond/gemstone details
+    /* ==============================
+       💎 DIAMOND DETAILS
+    =============================== */
     if (["Diamond", "Gemstone", "Fashion"].includes(updateData.categoryType)) {
-      if (diamondDetails) {
-        try {
-          updateOps.$set.diamondDetails =
-            typeof diamondDetails === "string"
-              ? JSON.parse(diamondDetails)
-              : diamondDetails;
-        } catch {
-          console.warn("⚠️ Invalid diamondDetails JSON, skipping");
-        }
-      }
-      if (sideDiamondDetails) {
-        try {
-          updateOps.$set.sideDiamondDetails =
-            typeof sideDiamondDetails === "string"
-              ? JSON.parse(sideDiamondDetails)
-              : sideDiamondDetails;
-        } catch {
-          console.warn("⚠️ Invalid sideDiamondDetails JSON, skipping");
-        }
-      }
+      const parsedDiamond = parseJSON(diamondDetails);
+      const parsedSide = parseJSON(sideDiamondDetails);
+      if (parsedDiamond) updateOps.$set.diamondDetails = parsedDiamond;
+      if (parsedSide) updateOps.$set.sideDiamondDetails = parsedSide;
     } else {
       updateOps.$unset = {
         ...updateOps.$unset,
@@ -539,7 +579,11 @@ export const updateOrnament = async (req, res) => {
       };
     }
 
-    // ✅ Perform update
+    console.log("🧩 Final parsedVariants:", parsedVariants);
+
+    /* ==============================
+       ✅ DB UPDATE
+    =============================== */
     const ornament = await Ornament.findByIdAndUpdate(req.params.id, updateOps, {
       new: true,
       runValidators: true,
@@ -554,7 +598,7 @@ export const updateOrnament = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: "Ornament updated successfully",
+      message: "✅ Ornament updated successfully",
       ornament,
     });
   } catch (err) {
