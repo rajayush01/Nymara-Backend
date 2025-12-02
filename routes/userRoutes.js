@@ -10,19 +10,14 @@ import sendEmail from "../emailer/sendEmail.js";
 
 const router = express.Router();
 
-/**
- * 🔹 Get all ornaments (public route)
- */
 router.get("/ornaments", async (req, res) => {
   try {
     const {
       gender,
       category,
       subCategory,
-      type,
       metalType,
       stoneType,
-      style,
       size,
       color,
       minPrice,
@@ -30,11 +25,10 @@ router.get("/ornaments", async (req, res) => {
       search,
       sort,
       currency = "INR",
+      includeVariants = "false",
     } = req.query;
 
-    let filter = {};
-
-    // 🔹 Currency rates
+    const curr = currency.toUpperCase();
     const currencyRates = {
       INR: { rate: 1, symbol: "₹" },
       USD: { rate: 0.012, symbol: "$" },
@@ -43,137 +37,150 @@ router.get("/ornaments", async (req, res) => {
       EUR: { rate: 0.011, symbol: "€" },
     };
 
-    // 🔹 Determine selected currency (default: INR)
-    const selectedCurrency =
-      currencyRates[currency.toUpperCase()] || currencyRates["INR"];
+    const selectedCurrency = currencyRates[curr] || currencyRates.INR;
 
-    // 🔹 Gender filter
+    /* ==========================================================
+       1. BUILD FILTER
+    ========================================================== */
+    let filter = {};
+
+    if (includeVariants === "false") filter.isVariant = false;
+
     if (gender) filter.gender = new RegExp(gender, "i");
 
-    // 🔹 Category filter
     if (category) {
-      const catArray = Array.isArray(category) ? category : category.split(",");
-      filter.category = { $in: catArray.map((c) => new RegExp(`^${c.trim()}$`, "i")) };
+      const arr = Array.isArray(category) ? category : category.split(",");
+      filter.category = { $in: arr.map((c) => new RegExp(`^${c}$`, "i")) };
     }
 
-    // 🔹 SubCategory filter
     if (subCategory) {
-      const subCatArray = Array.isArray(subCategory) ? subCategory : subCategory.split(",");
-      filter.subCategory = {
-        $in: subCatArray.map((s) => new RegExp(s.trim(), "i")),
-      };
+      const arr = Array.isArray(subCategory) ? subCategory : subCategory.split(",");
+      filter.subCategory = { $in: arr.map((c) => new RegExp(c, "i")) };
     }
 
-    // 🔹 Type filter
-  if (type) {
-  const types = Array.isArray(type) ? type : type.split(",");
-  filter.type = { $in: types.map(t => new RegExp(`^${t.trim()}$`, "i")) };
-}
-
-    // 🔹 Metal type filter
-    if (metalType) {
-      const metals = Array.isArray(metalType) ? metalType : metalType.split(",");
-      filter.metalType = { $in: metals.map((m) => new RegExp(m, "i")) };
+    if (search) {
+      const regex = new RegExp(search, "i");
+      filter.$or = [{ name: regex }, { description: regex }];
     }
 
-    // 🔹 Stone type filter
-    if (stoneType) {
-      const stones = Array.isArray(stoneType) ? stoneType : stoneType.split(",");
-      filter.stoneType = { $in: stones.map((s) => new RegExp(s, "i")) };
-    }
+    /* ==========================================================
+       2. FETCH MAIN PRODUCTS
+    ========================================================== */
+    const mains = await Ornament.find(filter).lean();
 
-    // 🔹 Style filter
-    if (style) {
-      const styles = Array.isArray(style) ? style : style.split(",");
-      filter.style = { $in: styles.map((s) => new RegExp(s, "i")) };
-    }
+    /* Collect IDs of all variants */
+    const variantIds = [];
 
-    // 🔹 Size filter
-    if (size) {
-      const sizes = Array.isArray(size) ? size : size.split(",");
-      filter.size = { $in: sizes.map((s) => new RegExp(s, "i")) };
-    }
-
-    // 🔹 Color filter
-    if (color) {
-      const colors = Array.isArray(color) ? color : color.split(",");
-      filter.color = { $in: colors.map((c) => new RegExp(c, "i")) };
-    }
-
-    // 🔹 Price range filter
-    if (minPrice || maxPrice) {
-      filter.price = {};
-      if (minPrice) filter.price.$gte = Number(minPrice);
-      if (maxPrice) filter.price.$lte = Number(maxPrice);
-    }
-
-    // 🔹 Search filter (across multiple fields)
- if (search && search.trim() !== "") {
-      const searchRegex = new RegExp(search, "i");
-      const searchConditions = [
-        { name: searchRegex },
-        { description: searchRegex },
-        { category: searchRegex },
-        { subCategory: searchRegex },
-        { type: searchRegex },
-        { metalType: searchRegex },
-        { stoneType: searchRegex },
-        { style: searchRegex },
-        { color: searchRegex },
-      ];
-      filter = { $and: [filter, { $or: searchConditions }] };
-    }
-
-    // 🔹 Sorting
-    let sortOption = { createdAt: -1 };
-    if (sort === "price_asc") sortOption = { price: 1 };
-    if (sort === "price_desc") sortOption = { price: -1 };
-    if (sort === "newest") sortOption = { createdAt: -1 };
-    if (sort === "oldest") sortOption = { createdAt: 1 };
-    if (sort === "featured") sortOption = { isFeatured: -1, createdAt: -1 };
-
-    
-
-    // 🔹 Fetch ornaments
-   // 🔹 Fetch ornaments (NO LIMIT)
-const ornaments = await Ornament.find(filter).sort(sortOption);
-
-
-    const total = await Ornament.countDocuments(filter);
-
-    // 🔹 Currency conversion + discount calculation
-    const ornamentsWithCurrency = ornaments.map((orn) => {
-      const price = orn.price || 0;
-      const originalPrice = orn.originalPrice || price;
-      const discount =
-        orn.discount ||
-        (originalPrice > price
-          ? Math.round(((originalPrice - price) / originalPrice) * 100)
-          : 0);
-
-      const convertedPrice = price
-        ? Number((price * selectedCurrency.rate).toFixed(2))
-        : null;
-
-      return {
-        ...orn.toObject(),
-        priceInINR: price,
-        convertedPrice,
-        currency: selectedCurrency.symbol,
-        originalPrice,
-        discount,
-        prices: orn.prices || {},
-      };
+    mains.forEach((item) => {
+      if (!item.isVariant && item.variants) {
+        Object.values(item.variants).forEach((id) => variantIds.push(id));
+      }
     });
 
-    // ✅ Send Response
+    /* Fetch variants in one query */
+    const variants = await Ornament.find({
+      _id: { $in: variantIds },
+    }).lean();
+
+    /* Build map for quick access */
+    const variantMap = {};
+    variants.forEach((v) => {
+      variantMap[v._id.toString()] = v;
+    });
+
+    /* ==========================================================
+       3. TRANSFORM OUTPUT (FAST)
+    ========================================================== */
+    let output = [];
+
+    for (let product of mains) {
+      if (!product.isVariant) {
+        const variantIds = Object.values(product.variants || {});
+        const theseVariants = variantIds.map((id) => variantMap[id.toString()]).filter(Boolean);
+
+        const converted = theseVariants.map((v) => {
+          let price = v.price;
+          let making = v.makingCharges;
+          let symbol = selectedCurrency.symbol;
+
+          // Currency override
+          if (v.prices?.[curr]) {
+            price = v.prices[curr].amount;
+            symbol = v.prices[curr].symbol;
+          } else {
+            price = Number((price * selectedCurrency.rate).toFixed(2));
+          }
+
+          if (v.makingChargesByCountry?.[curr]) {
+            making = v.makingChargesByCountry[curr].amount;
+          } else {
+            making = Number((making * selectedCurrency.rate).toFixed(2));
+          }
+
+          const total = Number((price + making).toFixed(2));
+
+          return {
+            ...v,
+            displayPrice: total,
+            currency: symbol,
+          };
+        });
+
+        const startingPrice =
+          converted.length > 0
+            ? Math.min(...converted.map((v) => v.displayPrice))
+            : null;
+
+        output.push({
+          ...product,
+          variants: converted,
+          startingPrice,
+          currency: selectedCurrency.symbol,
+        });
+      } else if (includeVariants === "true") {
+        // Show variants separately if asked
+        let price = product.price;
+        let symbol = selectedCurrency.symbol;
+
+        if (product.prices?.[curr]) {
+          price = product.prices[curr].amount;
+          symbol = product.prices[curr].symbol;
+        } else {
+          price = Number((price * selectedCurrency.rate).toFixed(2));
+        }
+
+        output.push({
+          ...product,
+          displayPrice: price,
+          currency: symbol,
+        });
+      }
+    }
+
+    /* ==========================================================
+       4. SORTING
+    ========================================================== */
+    if (sort === "price_asc")
+      output.sort((a, b) => (a.startingPrice || Infinity) - (b.startingPrice || Infinity));
+
+    if (sort === "price_desc")
+      output.sort((a, b) => (b.startingPrice || 0) - (a.startingPrice || 0));
+
+    if (sort === "newest")
+      output.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    if (sort === "oldest")
+      output.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+    /* ==========================================================
+       5. SEND RESPONSE
+    ========================================================== */
     res.json({
       success: true,
-      total,
-     
-      count: ornaments.length,
-      ornaments: ornamentsWithCurrency,
+      count: output.length,
+      ornaments: output,
     });
+
   } catch (err) {
     console.error("❌ Error fetching ornaments:", err);
     res.status(500).json({
@@ -183,6 +190,7 @@ const ornaments = await Ornament.find(filter).sort(sortOption);
     });
   }
 });
+
 
 
     
@@ -199,122 +207,153 @@ router.get("/ornaments/:id", async (req, res) => {
     const { currency = "INR" } = req.query;
     const curr = currency.toUpperCase();
 
-    // ✅ Validate ID
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid ornament ID" });
+    // Currency rates
+    const currencyRates = {
+      INR: { rate: 1, symbol: "₹" },
+      USD: { rate: 0.012, symbol: "$" },
+      GBP: { rate: 0.0095, symbol: "£" },
+      CAD: { rate: 0.016, symbol: "CA$" },
+      EUR: { rate: 0.011, symbol: "€" },
+    };
+    const selectedCurrency = currencyRates[curr] || currencyRates.INR;
+
+    // Validate ID
+    const ornamentId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(ornamentId)) {
+      return res.status(400).json({ success: false, message: "Invalid ornament ID" });
     }
 
-    // ✅ Fetch ornament (no populate since variants are embedded)
-    const ornament = await Ornament.findById(req.params.id).lean();
-
+    // Fetch ornament
+    const ornament = await Ornament.findById(ornamentId).lean();
     if (!ornament) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Ornament not found" });
+      return res.status(404).json({ success: false, message: "Ornament not found" });
     }
 
-    // 💰 Price Conversion Logic
-    let convertedPrice = ornament.price;
-    let symbol = "₹";
+    /* ==========================================================
+       HELPER: Convert any product's price
+    ========================================================== */
+    const convertPrice = (item) => {
+      let price = item.price || 0;
+      let making = item.makingCharges || 0;
+      let symbol = selectedCurrency.symbol;
 
-    if (ornament.prices && ornament.prices[curr]) {
-      // Predefined price
-      convertedPrice = ornament.prices[curr].amount;
-      symbol = ornament.prices[curr].symbol;
-    } else if (curr !== "INR" && currencyRates[curr]) {
-      // Convert dynamically
-      convertedPrice = ornament.price
-        ? Number((ornament.price * currencyRates[curr].rate).toFixed(2))
-        : null;
-      symbol = currencyRates[curr].symbol;
-    }
-
-    // 💎 Making Charges Conversion
-    let convertedMakingCharge = ornament.makingCharges || 0;
-
-    if (
-      ornament.makingChargesByCountry &&
-      ornament.makingChargesByCountry[curr]
-    ) {
-      convertedMakingCharge = ornament.makingChargesByCountry[curr].amount;
-    } else if (currencyRates[curr]) {
-      convertedMakingCharge = Number(
-        ((ornament.makingCharges || 0) * currencyRates[curr].rate).toFixed(2)
-      );
-    }
-
-    // 🧠 Diamond/Gemstone/Fashion Product Details
-    const diamondInfo =
-      ["Diamond", "Gemstone", "Fashion"].includes(ornament.categoryType)
-        ? {
-            diamondDetails: ornament.diamondDetails || null,
-            sideDiamondDetails: ornament.sideDiamondDetails || null,
-          }
-        : {};
-
-    // 🧮 Discount and Original Price
-    const price = ornament.price || 0;
-    const originalPrice = ornament.originalPrice || price;
-
-    const discount =
-      ornament.discount ||
-      Math.round(((originalPrice - price) / originalPrice) * 100) ||
-      0;
-
-    const totalConvertedPrice = Number(
-      (convertedPrice + convertedMakingCharge).toFixed(2)
-    );
-
-    // 🖼 Determine Display Images
-    // If product has variants, prefer the default variant or the first variant’s images
-    let displayCoverImage = ornament.coverImage || null;
-    let displayImages =
-      (ornament.images && ornament.images.length > 0 ? ornament.images : []) ||
-      [];
-
-    if (ornament.variants && ornament.variants.length > 0) {
-      const defaultVariant =
-        ornament.variants.find((v) => v.isDefault) || ornament.variants[0];
-
-      if (defaultVariant) {
-        displayCoverImage =
-          defaultVariant.coverImage || ornament.coverImage || null;
-        if (defaultVariant.images?.length > 0) {
-          displayImages = defaultVariant.images;
-        }
+      // Handle custom price by currency
+      if (item.prices?.[curr]) {
+        price = item.prices[curr].amount;
+        symbol = item.prices[curr].symbol;
+      } else {
+        price = Number((price * selectedCurrency.rate).toFixed(2));
       }
+
+      // Handle country making charges
+      if (item.makingChargesByCountry?.[curr]) {
+        making = item.makingChargesByCountry[curr].amount;
+      } else {
+        making = Number((making * selectedCurrency.rate).toFixed(2));
+      }
+
+      const total = Number((price + making).toFixed(2));
+
+      const original = item.originalPrice || item.price || price;
+      const discount =
+        item.discount ||
+        (original > price
+          ? Math.round(((original - price) / original) * 100)
+          : 0);
+
+      return {
+        price,
+        making,
+        total,
+        symbol,
+        original,
+        discount,
+      };
+    };
+
+    /* ==========================================================
+       CASE 1 → VARIANT PRODUCT
+    ========================================================== */
+    if (ornament.isVariant) {
+      const converted = convertPrice(ornament);
+
+      return res.json({
+        success: true,
+        type: "variant",
+        ornament: {
+          ...ornament,
+          displayPrice: converted.price,
+          convertedMakingCharge: converted.making,
+          totalConvertedPrice: converted.total,
+          currency: converted.symbol,
+          originalPrice: converted.original,
+          discount: converted.discount,
+          metal: ornament.metal,
+          stones: ornament.stones || [],
+          images: ornament.images || [],
+          coverImage: ornament.coverImage || null,
+          model3D: ornament.model3D || null,
+          videoUrl: ornament.videoUrl || null,
+        },
+      });
     }
 
-    // ✅ Final response
-    res.json({
+    /* ==========================================================
+       CASE 2 → MAIN PRODUCT
+       Fetch all variants and convert their prices
+    ========================================================== */
+    const variants = await Ornament.find({
+      parentProduct: ornament._id,
+      isVariant: true,
+    }).lean();
+
+    // Convert prices for all variants
+    const convertedVariants = variants.map((v) => {
+      const converted = convertPrice(v);
+
+      return {
+        ...v,
+        displayPrice: converted.price,
+        convertedMakingCharge: converted.making,
+        totalConvertedPrice: converted.total,
+        currency: converted.symbol,
+        originalPrice: converted.original,
+        discount: converted.discount,
+      };
+    });
+
+    // Starting price = lowest total price among variants
+    const startingPrice =
+      convertedVariants.length > 0
+        ? Math.min(...convertedVariants.map((v) => v.totalConvertedPrice))
+        : null;
+
+    return res.json({
       success: true,
+      type: "main",
       ornament: {
         ...ornament,
-        ...diamondInfo,
-        displayCoverImage,
-        displayImages,
-        priceInINR: ornament.price,
-        convertedPrice,
-        convertedMakingCharge,
-        totalConvertedPrice,
-        currency: symbol,
-        originalPrice,
-        discount,
+        currency: selectedCurrency.symbol,
+        variants: convertedVariants,
+        startingPrice,
+        metal: ornament.metal,
+        stones: ornament.stones || [],
+        images: ornament.images || [],
+        coverImage: ornament.coverImage || null,
         model3D: ornament.model3D || null,
-        variants: ornament.variants || [],
+        videoUrl: ornament.videoUrl || null,
       },
     });
   } catch (error) {
     console.error("❌ Get Ornament Error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: "Failed to fetch ornament",
       error: error.message,
     });
   }
 });
+
 
 
 // Save/update user details

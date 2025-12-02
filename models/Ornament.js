@@ -1,36 +1,22 @@
 import mongoose from "mongoose";
 
-// 🔹 Define embedded variant schema (no separate product IDs)
-const variantSchema = new mongoose.Schema(
-  {
-    color: { type: String, default: "" },
-    metalType: { type: String, default: "" },
-    size: { type: String, default: "" },
-    price: { type: Number, default: 0 },
-    coverImage: { type: String, default: null },
-    images: { type: [String], default: [] },
-     videoUrl: { type: String, default: null },
-    isDefault: { type: Boolean, default: false }, // helps frontend identify the main variant
-  },
-  { _id: false } // prevents auto-creating _id for each variant
-);
-
 const ornamentSchema = new mongoose.Schema(
   {
-    // 🔸 Basic Details
+    /* BASIC INFO */
     name: { type: String, required: true },
+    description: { type: String, default: "" },
     rating: { type: Number, default: 0 },
     reviews: { type: Number, default: 0 },
 
-    // 🔸 Categorization
+    /* CATEGORY */
     categoryType: {
       type: String,
-      enum: ["Gold", "Diamond", "Gemstone", "Fashion"],
-      required: [true, "Category type is required"],
+      enum: ["Gold", "Diamond", "Gemstone", "Fashion", "Composite"],
+      required: true,
     },
+
     category: {
       type: String,
-      required: true,
       enum: [
         "rings",
         "earrings",
@@ -39,164 +25,169 @@ const ornamentSchema = new mongoose.Schema(
         "mens",
         "loose-diamonds",
       ],
-    },
-    subCategory: {
-      type: String,
-      enum: [
-        "engagement",
-        "wedding",
-        "eternity",
-        "cocktail",
-        "gemstone",
-        "gold",
-        "fashion",
-        "studs",
-        "hoops",
-        "tennis",
-        "pendants",
-        "bangles",
-        "mens rings",
-        "mens earrings",
-        "mens necklaces",
-        "mens bracelets",
-        "cufflinks",
-      ],
-      default: null,
-    },
-    type: {
-      type: String,
       required: true,
-      enum: [
-        "rings",
-        "earrings",
-        "necklaces",
-        "bracelets",
-        "mens",
-        "loose-diamonds",
-      ],
     },
+
+    subCategory: { type: String, default: null },
+
     gender: {
       type: String,
       enum: ["Men", "Women", "Unisex"],
-      required: [true, "Gender is required"],
+      required: true,
     },
 
-    // 🔸 Identification
-    sku: { type: String, unique: true, index: true },
+    /* VARIANT SYSTEM */
+    isVariant: { type: Boolean, default: false },
 
-    // 🔸 Pricing and Attributes
-    weight: { type: Number, required: true },
-    purity: { type: String, default: "" },
-    price: { type: Number, required: true },
+    // This is only for VARIANT products
+    parentProduct: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Ornament",
+      default: null,
+    },
+
+    // Base product: stores variant ids by label
+    // Example:
+    //  variants: {
+    //     "18K Yellow Gold" : ObjectId("..."),
+    //     "18K White Gold": ObjectId("...")
+    //  }
+    variants: {
+      type: Map,
+      of: { type: mongoose.Schema.Types.ObjectId, ref: "Ornament" },
+      default: {},
+    },
+
+    // Label shown on UI (e.g., “Metal Type”, “Color”, “Purity”)
+    variantLabel: { type: String, default: "" },
+
+    /* SKU */
+    sku: { type: String, unique: true, sparse: true },
+
+    /* COMPOSITE PRICING */
+    /* ===========================
+       METAL COMPONENT 
+       =========================== */
+    metal: {
+      weight: { type: Number, default: 0 }, // grams
+      purity: { type: String, default: "" }, // 18K, 22K, etc.
+      metalType: {
+        type: String,
+        enum: [
+           "18K Gold", 
+"18K White Gold", 
+"18K Rose Gold", 
+"14K Gold", 
+"14K White Gold",
+"14K Rose Gold", 
+"Platinum", 
+"925 Sterling Silver",
+"Gold Vermeil",
+          "",
+        ],
+        default: "",
+      },
+    },
+
+    /* ===========================
+       DIAMOND / GEMSTONE COMPONENT 
+       =========================== */
+      gemstoneDetails: [
+  {
+    stoneType: { type: String, required: true },  // Ruby, Emerald, Sapphire
+    carat: { type: Number, default: 0 },
+    count: { type: Number, default: 1 },
+    color: { type: String, default: "" },
+    clarity: { type: String, default: "" },
+    cut: { type: String, default: "" },
+    pricePerCarat: { type: Number, default: 0 },
+    useAuto: { type: Boolean, default: true }
+  }
+],
+
+
+    // OPTIONAL — Main Diamond Details
+   diamondDetails: {
+  carat: { type: Number, default: 0 },
+  count: { type: Number, default: 0 },
+  color: { type: String, default: "" },
+  clarity: { type: String, default: "" },
+  cut: { type: String, default: "" },
+  pricePerCarat: { type: Number, default: 0 },
+  useAuto: { type: Boolean, default: true },
+},
+mainDiamondTotal: { type: Number, default: 0 },
+
+
+
+sideDiamondDetails: [
+  {
+    carat: { type: Number, default: 0 },
+    count: { type: Number, default: 0 },
+    color: { type: String, default: "" },
+    clarity: { type: String, default: "" },
+    cut: { type: String, default: "" },
+    pricePerCarat: { type: Number, default: 0 },
+    useAuto: { type: Boolean, default: true },
+  }
+],
+
+sideDiamondTotal: { type: Number, default: 0 },
+
+
+
+
+    /* PRICING */
+    price: { type: Number, default: 0 },
     originalPrice: { type: Number, default: 0 },
     discount: { type: Number, default: 0 },
+
     makingCharges: { type: Number, default: 0 },
     prices: { type: mongoose.Schema.Types.Mixed, default: {} },
     makingChargesByCountry: { type: mongoose.Schema.Types.Mixed, default: {} },
 
-    // 🔸 Stone and Metal Info
-    stoneDetails: { type: String, default: "" },
-    description: { type: String, default: "" },
-    stock: { type: Number, default: 1 },
-    isFeatured: { type: Boolean, default: false },
-    metalType: {
-      type: String,
-      enum: [
-        "18K White Gold",
-        "18K Yellow Gold",
-        "18K Rose Gold",
-        "Platinum",
-        "Sterling Silver",
-        "14K Yellow Gold",
-        "",
-      ],
-      default: "",
-    },
-    stoneType: {
-      type: String,
-      enum: [
-        "Lab-Grown Diamond",
-        "Lab-Grown Sapphire",
-        "Lab-Grown Emerald",
-        "Lab-Grown Ruby",
-        "Pearl",
-        "None",
-        "",
-      ],
-      default: "",
-    },
-    style: {
-      type: String,
-      enum: [
-        "Solitaire",
-        "Halo",
-        "Three Stone",
-        "Wedding Band",
-        "Eternity",
-        "Cocktail",
-        "Drop",
-        "Vintage",
-        "Tennis",
-        "Cluster",
-        "Chain",
-        "Signet",
-        "Studs",
-        "Bangles",
-        "",
-      ],
-      default: "",
-    },
-    size: { type: String, default: "" },
-    color: { type: String, default: "" },
-
-    // 🔸 Media
-    coverImage: { type: String, required: true },
+    /* MEDIA */
+    coverImage: { type: String, default: null },
     images: { type: [String], default: [] },
     model3D: { type: String, default: null },
     videoUrl: { type: String, default: null },
 
-    // 🔸 Diamond / Gemstone Details
-    diamondDetails: { type: mongoose.Schema.Types.Mixed, default: null },
-    sideDiamondDetails: { type: mongoose.Schema.Types.Mixed, default: null },
+    /* MISC */
+    stock: { type: Number, default: 1 },
+    isFeatured: { type: Boolean, default: false },
 
-    // 🔸 Variant Data (embedded)
-    variants: [variantSchema], // ✅ all variants live inside the same product
-
-    // 🔸 Misc
-    variantLinks: { type: mongoose.Schema.Types.Mixed, default: {} },
+    color: { type: String, default: "" },
+    size: { type: String, default: "" },
   },
   { timestamps: true }
 );
 
-// 🔹 Index for faster queries
+/* INDEXES */
 ornamentSchema.index({ category: 1, gender: 1, isFeatured: 1 });
+ornamentSchema.index({ parentProduct: 1 });
 
-// 🔹 Auto-generate SKU
+/* SKU GENERATION */
 ornamentSchema.pre("save", async function (next) {
-  if (!this.isNew) return next();
+  if (!this.isNew || !this.categoryType) return next();
 
-  const catCode = this.categoryType?.substring(0, 2)?.toUpperCase() || "XX";
-  const genderCode = this.gender?.substring(0, 1)?.toUpperCase() || "U";
-  const typeCode = this.category?.substring(0, 3)?.toUpperCase() || "GEN";
+  const catCode = this.categoryType.substring(0, 2).toUpperCase();
+  const genderCode = this.gender.substring(0, 1).toUpperCase();
+  const typeCode = this.category.substring(0, 3).toUpperCase();
 
-  // Find the last SKU with the same prefix
   const prefix = `${catCode}-${genderCode}-${typeCode}-`;
 
-  const lastProduct = await mongoose
+  const last = await mongoose
     .model("Ornament")
     .findOne({ sku: new RegExp(`^${prefix}`) })
     .sort({ sku: -1 });
 
   let nextNumber = 1;
-
-  if (lastProduct?.sku) {
-    const parts = lastProduct.sku.split("-");
-    const lastNum = parseInt(parts[3], 10);
-    if (!isNaN(lastNum)) nextNumber = lastNum + 1;
+  if (last?.sku) {
+    const num = parseInt(last.sku.split("-")[3], 10);
+    if (!isNaN(num)) nextNumber = num + 1;
   }
 
   this.sku = `${prefix}${String(nextNumber).padStart(3, "0")}`;
-
   next();
 });
 
