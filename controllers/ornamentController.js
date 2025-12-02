@@ -1513,39 +1513,77 @@ else if (metal.metalType === "Gold Vermeil") {
       return m?.amount ? Number(m.amount) : Number(item.makingCharges);
     };
 
+    // const convertUsingDB = (item, curr, totals) => {
+    //   const rate = selectedCurrency.rate;
+    //   const symbol = selectedCurrency.symbol;
+
+    //   const displayPrice = totals.basePrice * rate;
+    //   const convertedMaking = Number(item.makingCharges || 0) * rate;
+
+    //   return {
+    //     // ...item,
+    //     // ...totals,
+    //     // displayPrice,
+    //     // convertedMakingCharge: convertedMaking,
+    //     // totalConvertedPrice: displayPrice + convertedMaking,
+    //     // currency: symbol
+    //     ...item,
+
+    //     price: totals.basePrice,
+
+    //     //  Always override totals with computed values
+    //     goldTotal: totals.goldTotal,
+    //     mainDiamondTotal: totals.mainDiamondTotal,
+    //     sideDiamondTotal: totals.sideDiamondTotal,
+    //     gemstonesTotal: totals.gemstonesTotal,
+    //     basePrice: totals.basePrice,
+
+    //     //  Currency-calculated values
+    //     displayPrice,
+    //     convertedMakingCharge: convertedMaking,
+    //     totalConvertedPrice: displayPrice + convertedMaking,
+    //     currency: symbol,
+
+    //   };
+    // };
+
     const convertUsingDB = (item, curr, totals) => {
-      const rate = selectedCurrency.rate;
-      const symbol = selectedCurrency.symbol;
+  const rate = selectedCurrency.rate;
+  const symbol = selectedCurrency.symbol;
 
-      const displayPrice = totals.basePrice * rate;
-      const convertedMaking = Number(item.makingCharges || 0) * rate;
+  // 1️⃣ DB Price Override
+  const dbPrice = item.prices?.[curr]?.amount;
+  const displayPrice =
+    dbPrice !== undefined && dbPrice !== null
+      ? Number(dbPrice)
+      : totals.basePrice * rate;
 
-      return {
-        // ...item,
-        // ...totals,
-        // displayPrice,
-        // convertedMakingCharge: convertedMaking,
-        // totalConvertedPrice: displayPrice + convertedMaking,
-        // currency: symbol
-        ...item,
+  // 2️⃣ DB Making Override
+  const dbMaking = item.makingChargesByCountry?.[curr]?.amount;
+  const convertedMakingCharge =
+    dbMaking !== undefined && dbMaking !== null
+      ? Number(dbMaking)
+      : Number(item.makingCharges || 0) * rate;
 
-        price: totals.basePrice,
+  return {
+    ...item,
 
-        //  Always override totals with computed values
-        goldTotal: totals.goldTotal,
-        mainDiamondTotal: totals.mainDiamondTotal,
-        sideDiamondTotal: totals.sideDiamondTotal,
-        gemstonesTotal: totals.gemstonesTotal,
-        basePrice: totals.basePrice,
+    goldTotal: totals.goldTotal,
+    mainDiamondTotal: totals.mainDiamondTotal,
+    sideDiamondTotal: totals.sideDiamondTotal,
+    gemstonesTotal: totals.gemstonesTotal,
+    basePrice: totals.basePrice,
 
-        //  Currency-calculated values
-        displayPrice,
-        convertedMakingCharge: convertedMaking,
-        totalConvertedPrice: displayPrice + convertedMaking,
-        currency: symbol,
+    displayPrice,
+    convertedMakingCharge,
+    totalConvertedPrice: displayPrice + convertedMakingCharge,
 
-      };
-    };
+    currency: symbol,
+    priceSource: dbPrice ? "DB" : "AUTO",
+    makingSource: dbMaking ? "DB" : "AUTO"
+  };
+};
+
 
 
 
@@ -2324,3 +2362,4 @@ export const deleteOrnament = async (req, res) => {
     res.status(500).json({ message: "Failed to delete ornament", error: err.message });
   }
 };
+
