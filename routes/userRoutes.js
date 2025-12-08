@@ -355,6 +355,187 @@ router.get("/ornaments", async (req, res) => {
 // });
 
 
+// router.get("/ornaments/:id", async (req, res) => {
+//   try {
+//     const { currency = "INR" } = req.query;
+//     const curr = currency.toUpperCase();
+
+//     const currencyRates = {
+//       INR: { rate: 1, symbol: "₹" },
+//       USD: { rate: 0.012, symbol: "$" },
+//       GBP: { rate: 0.0095, symbol: "£" },
+//       CAD: { rate: 0.016, symbol: "CA$" },
+//       EUR: { rate: 0.011, symbol: "€" },
+//       AED: { rate: 0.009, symbol: "د.إ" },
+//       AUD: { rate: 0.018, symbol: "A$" },
+//       SGD: { rate: 0.016, symbol: "S$" },
+//       JPY: { rate: 1.8, symbol: "¥" },
+//     };
+
+//     const selectedCurrency = currencyRates[curr] || currencyRates.INR;
+
+//     const ornamentId = req.params.id;
+//     if (!mongoose.Types.ObjectId.isValid(ornamentId)) {
+//       return res.status(400).json({ success: false, message: "Invalid ornament ID" });
+//     }
+
+//     let ornament = await Ornament.findById(ornamentId).lean();
+//     if (!ornament) {
+//       return res.status(404).json({ success: false, message: "Ornament not found" });
+//     }
+
+//     /* -----------------------------------------------------------
+//        FIX 1: NORMALIZE OBJECT-BASED VARIANT IDS
+//        ex: { "925 Sterling Silver": ObjectId("..") }
+//     ------------------------------------------------------------*/
+//     const normalVariantIds = [];
+
+//     if (ornament.variants && typeof ornament.variants === "object" && !Array.isArray(ornament.variants)) {
+//       for (const key in ornament.variants) {
+//         const value = ornament.variants[key];
+
+//         let idString = null;
+
+//         if (value && typeof value === "object" && value._bsontype === "ObjectId") {
+//           idString = value.toString();
+//         } else if (typeof value === "string") {
+//           idString = value;
+//         } else if (value?.$oid) {
+//           idString = value.$oid;
+//         }
+
+//         if (idString && mongoose.Types.ObjectId.isValid(idString)) {
+//           normalVariantIds.push(idString);
+//         }
+//       }
+//     }
+
+//     /* -----------------------------------------------------------
+//        PRICE CONVERTER
+//     ------------------------------------------------------------*/
+//     const convertPrice = (item) => {
+//       let price = item.price || 0;
+//       let making = item.makingCharges || 0;
+//       let symbol = selectedCurrency.symbol;
+
+//       // DB_OVERRIDE price
+//       if (item.prices?.[curr]) {
+//         price = Number(item.prices[curr].amount);
+//         symbol = item.prices[curr].symbol || symbol;
+//       } else {
+//         price = Number((price * selectedCurrency.rate).toFixed(2));
+//       }
+
+//       // DB_OVERRIDE making
+//       if (item.makingChargesByCountry?.[curr]) {
+//         making = Number(item.makingChargesByCountry[curr].amount);
+//       } else {
+//         making = Number((making * selectedCurrency.rate).toFixed(2));
+//       }
+
+//       const total = Number((price + making).toFixed(2));
+//       const original = item.originalPrice || item.price || price;
+//       const discount =
+//         item.discount ||
+//         (original > price ? Math.round(((original - price) / original) * 100) : 0);
+
+//       return { price, making, total, symbol, original, discount };
+//     };
+
+//     /* ==========================================================
+//        CASE 1 — VARIANT PRODUCT ITSELF
+//     ==========================================================*/
+//     if (ornament.isVariant) {
+//       const converted = convertPrice(ornament);
+
+//       return res.json({
+//         success: true,
+//         type: "variant",
+//         ornament: {
+//           ...ornament,
+//           displayPrice: converted.price,
+//           convertedMakingCharge: converted.making,
+//           totalConvertedPrice: converted.total,
+//           currency: converted.symbol,
+//           originalPrice: converted.original,
+//           discount: converted.discount,
+//         },
+//       });
+//     }
+
+//     /* ==========================================================
+//        CASE 2 — MAIN PRODUCT
+//        Fetch variants in 2 ways:
+//        1) From linked object-based variants
+//        2) From children: parentProduct = ornament._id
+//     ==========================================================*/
+
+//     // 1) Fetch object-based variants
+//     let objectBasedVariants = [];
+//     if (normalVariantIds.length > 0) {
+//       objectBasedVariants = await Ornament.find({ _id: { $in: normalVariantIds } }).lean();
+//     }
+
+//     // 2) Fetch child variants
+//     const childVariants = await Ornament.find({
+//       parentProduct: ornament._id,
+//       isVariant: true,
+//     }).lean();
+
+//     // Merge without duplicates
+//     const mergedVariants = [
+//       ...objectBasedVariants,
+//       ...childVariants.filter((cv) => 
+//         !objectBasedVariants.some((ov) => ov._id.toString() === cv._id.toString())
+//       )
+//     ];
+
+//     // Convert each variant
+//     const convertedVariants = mergedVariants.map((variant) => {
+//       const c = convertPrice(variant);
+//       return {
+//         ...variant,
+//         displayPrice: c.price,
+//         convertedMakingCharge: c.making,
+//         totalConvertedPrice: c.total,
+//         currency: c.symbol,
+//         originalPrice: c.original,
+//         discount: c.discount,
+//       };
+//     });
+
+//     const startingPrice =
+//       convertedVariants.length > 0
+//         ? Math.min(...convertedVariants.map((v) => v.totalConvertedPrice))
+//         : null;
+
+//     const convertedMain = convertPrice(ornament);
+
+//     return res.json({
+//       success: true,
+//       type: "main",
+//       ornament: {
+//         ...ornament,
+//         currency: convertedMain.symbol,
+//         displayPrice: convertedMain.price,
+//         convertedMakingCharge: convertedMain.making,
+//         totalConvertedPrice: convertedMain.total,
+//         originalPrice: convertedMain.original,
+//         discount: convertedMain.discount,
+//         variants: convertedVariants,
+//         startingPrice,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("❌ Get Ornament Error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch ornament",
+//       error: error.message,
+//     });
+//   }
+// });
+
 router.get("/ornaments/:id", async (req, res) => {
   try {
     const { currency = "INR" } = req.query;
@@ -380,6 +561,30 @@ router.get("/ornaments/:id", async (req, res) => {
     }
 
     let ornament = await Ornament.findById(ornamentId).lean();
+
+    console.log("🔍 Fetched Ornament:", ornament);
+
+
+
+// 🟢 FULLY NORMALIZE metal for pricing
+ornament.metal = {
+  weight: Number(ornament.metal?.weight || 0),
+  purity: ornament.metal?.purity || ornament.purity || null,
+  metalType: ornament.metal?.metalType || ornament.metalType || ""
+};
+
+console.log("🧪 NORMALIZED METAL:", ornament.metal);
+
+
+
+
+// ⭐ Same for diamonds
+ornament.diamondDetails = ornament.diamondDetails || {};
+ornament.sideDiamondDetails = ornament.sideDiamondDetails || [];
+ornament.gemstoneDetails = ornament.gemstoneDetails || [];
+
+
+
     if (!ornament) {
       return res.status(404).json({ success: false, message: "Ornament not found" });
     }
@@ -442,33 +647,143 @@ router.get("/ornaments/:id", async (req, res) => {
       return { price, making, total, symbol, original, discount };
     };
 
-    /* ==========================================================
-       CASE 1 — VARIANT PRODUCT ITSELF
-    ==========================================================*/
-    if (ornament.isVariant) {
-      const converted = convertPrice(ornament);
+  
+//-------------------------------------------------------
+//  PRICE BREAKDOWN CALCULATOR (GOLD + DIAMONDS + STONES)
+//-------------------------------------------------------
+const calculateTotals = async (item) => {
+  const pricing = await Pricing.findOne();
+  if (!pricing) {
+    return {
+      goldTotal: 0,
+      mainDiamondTotal: 0,
+      sideDiamondTotal: 0,
+      gemstonesTotal: 0,
+      basePrice: 0
+    };
+  }
 
-      return res.json({
-        success: true,
-        type: "variant",
-        ornament: {
-          ...ornament,
-          displayPrice: converted.price,
-          convertedMakingCharge: converted.making,
-          totalConvertedPrice: converted.total,
-          currency: converted.symbol,
-          originalPrice: converted.original,
-          discount: converted.discount,
-        },
-      });
-    }
+  let goldTotal = 0;
+  let mainDiamondTotal = 0;
+  let sideDiamondTotal = 0;
+  let gemstonesTotal = 0;
 
-    /* ==========================================================
-       CASE 2 — MAIN PRODUCT
-       Fetch variants in 2 ways:
-       1) From linked object-based variants
-       2) From children: parentProduct = ornament._id
-    ==========================================================*/
+  // =============================
+  // 🔥 GOLD — supports 14K / 18K / 22K / 24K
+  // =============================
+  let purity = null;
+
+  // direct purity
+  if (item.metal?.purity) purity = item.metal.purity.trim();
+
+  // extract from metalType e.g. "14K Yellow Gold"
+  if (!purity && item.metal?.metalType) {
+    const match = item.metal.metalType.match(/(\d{2}K)/i);
+    if (match) purity = match[1].toUpperCase();
+  }
+
+  // fallback to item.purity
+  if (!purity && item.purity) purity = item.purity.trim();
+
+const rate = pricing.goldPrices.get(purity) || 0;
+
+  const weight = Number(item.metal?.weight || 0);
+
+  goldTotal = rate * weight;
+
+  // =============================
+  // 💎 MAIN DIAMOND
+  // =============================
+  if (item.diamondDetails) {
+    const d = item.diamondDetails;
+    const r = d.pricePerCarat || pricing.diamondPricePerCarat || 0;
+    mainDiamondTotal = (d.carat || 0) * (d.count || 0) * r;
+  }
+
+  // =============================
+  // ✨ SIDE DIAMONDS
+  // =============================
+  if (Array.isArray(item.sideDiamondDetails)) {
+    sideDiamondTotal = item.sideDiamondDetails.reduce((sum, sd) => {
+      const r = sd.pricePerCarat || pricing.diamondPricePerCarat || 0;
+      return sum + (sd.carat || 0) * (sd.count || 0) * r;
+    }, 0);
+  }
+
+  // =============================
+  // GEMSTONES
+  // =============================
+  if (Array.isArray(item.gemstoneDetails)) {
+    gemstonesTotal = item.gemstoneDetails.reduce((sum, st) => {
+      const r = pricing.gemstonePrices?.[st.stoneType] || 0;
+      return sum + (st.carat || 0) * (st.count || 1) * r;
+    }, 0);
+  }
+
+  return {
+    goldTotal,
+    mainDiamondTotal,
+    sideDiamondTotal,
+    gemstonesTotal,
+    basePrice: goldTotal + mainDiamondTotal + sideDiamondTotal + gemstonesTotal
+  };
+};
+
+
+const convertUsingDB = (item, curr, totals) => {
+  const rate = currencyRates[curr]?.rate || 1;
+  const symbol = currencyRates[curr]?.symbol || "₹";
+
+  // Price override (DB)
+  const dbPrice = item.prices?.[curr]?.amount;
+  const displayPrice =
+    dbPrice !== undefined && dbPrice !== null
+      ? Number(dbPrice)
+      : totals.basePrice * rate;
+
+  // Making charges override (DB)
+  const dbMaking = item.makingChargesByCountry?.[curr]?.amount;
+  const convertedMakingCharge =
+    dbMaking !== undefined && dbMaking !== null
+      ? Number(dbMaking)
+      : Number(item.makingCharges || 0) * rate;
+
+  return {
+    ...item,
+    ...totals,
+
+    displayPrice,
+    convertedMakingCharge,
+    totalConvertedPrice: displayPrice + convertedMakingCharge,
+
+    currency: symbol,
+    priceSource: dbPrice ? "DB" : "AUTO",
+    makingSource: dbMaking ? "DB" : "AUTO",
+  };
+};
+
+ 
+
+
+
+
+ 
+
+if (ornament.isVariant) {
+  
+  const converted = convertUsingDB(ornament, curr);
+
+  return res.json({
+    success: true,
+    type: "variant",
+    ornament: converted
+  });
+}
+
+
+
+
+   
 
     // 1) Fetch object-based variants
     let objectBasedVariants = [];
@@ -490,52 +805,69 @@ router.get("/ornaments/:id", async (req, res) => {
       )
     ];
 
-    // Convert each variant
-    const convertedVariants = mergedVariants.map((variant) => {
-      const c = convertPrice(variant);
-      return {
-        ...variant,
-        displayPrice: c.price,
-        convertedMakingCharge: c.making,
-        totalConvertedPrice: c.total,
-        currency: c.symbol,
-        originalPrice: c.original,
-        discount: c.discount,
-      };
-    });
+// Convert each variant
+// Convert each variant
+const convertedVariants = await Promise.all(
+  mergedVariants.map(async (variant) => {
+    variant.metal = variant.metal || {
+      metalType: variant.metalType,
+      purity: variant.purity,
+      weight: variant.weight,
+    };
 
-    const startingPrice =
-      convertedVariants.length > 0
-        ? Math.min(...convertedVariants.map((v) => v.totalConvertedPrice))
-        : null;
+  
+    const totalsVariant = await calculateTotals(variant);
+const converted = convertUsingDB(variant, curr, totalsVariant);
+ // FIXED
+    return converted;
+  })
+);
 
-    const convertedMain = convertPrice(ornament);
+// Starting price
+const startingPrice =
+  convertedVariants.length > 0
+    ? Math.min(...convertedVariants.map((v) => v.totalConvertedPrice))
+    : null;
 
-    return res.json({
-      success: true,
-      type: "main",
-      ornament: {
-        ...ornament,
-        currency: convertedMain.symbol,
-        displayPrice: convertedMain.price,
-        convertedMakingCharge: convertedMain.making,
-        totalConvertedPrice: convertedMain.total,
-        originalPrice: convertedMain.original,
-        discount: convertedMain.discount,
-        variants: convertedVariants,
-        startingPrice,
-      },
-    });
+// Main product totals + conversion
+const totals = await calculateTotals(ornament);
+
+console.log(" GOLD TOTAL:", totals.goldTotal);
+console.log(" MAIN DIAMOND TOTAL:", totals.mainDiamondTotal);
+console.log(" SIDE DIAMOND TOTAL:", totals.sideDiamondTotal);
+console.log(" BASE PRICE:", totals.basePrice);
+
+const convertedMain = convertUsingDB(ornament, curr, totals);
+
+console.log(" MAIN PRODUCT CONVERTED:", convertedMain);
+
+
+return res.json({
+  success: true,
+  type: "main",
+  ornament: {
+    ...convertedMain,   // FIXED
+    variants: convertedVariants,
+    startingPrice,
+  }
+});
+
+
+
+
   } catch (error) {
-    console.error("❌ Get Ornament Error:", error);
+
+   
+    console.error("❌ FULL Backend Error:", error);
+
     return res.status(500).json({
+      
       success: false,
       message: "Failed to fetch ornament",
       error: error.message,
     });
   }
 });
-
 
 
 
@@ -647,6 +979,7 @@ router.post("/inquiry", async (req, res) => {
 
 
 export default router;
+
 
 
 
