@@ -7,6 +7,7 @@ import { currencyRates } from "../config/currencyRates.js";
 import { forgetPassword, resetPassword } from "../emailer/password.js";
 import CustomRequest from "../models/CustomRequest.js";
 import sendEmail from "../emailer/sendEmail.js";
+import Pricing from "../models/Pricing.js"; 
 
 const router = express.Router();
 
@@ -979,6 +980,7 @@ router.post("/inquiry", async (req, res) => {
 
 
 export default router;
+
 
 
 
