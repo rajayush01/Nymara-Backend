@@ -996,13 +996,28 @@ export const getOrnaments = async (req, res) => {
     //   filter.isVariant = false;
     // }
 
-    if (includeVariants === "false") {
+if (includeVariants === "false") {
   filter.isVariant = false;
 }
 
 // SEARCH (merged safely)
 if (search) {
   const regex = new RegExp(search.trim(), "i");
+
+  filter.$and = filter.$and || [];
+  filter.$and.push({
+    $or: [
+      { name: regex },
+      { description: regex },
+      { sku: regex },
+      { color: regex },
+      { metalType: regex },
+      { variantLabel: regex },
+    ],
+  });
+}
+
+
 
     /* =====================================================
        2. SORTING
@@ -2400,6 +2415,7 @@ export const deleteOrnament = async (req, res) => {
     res.status(500).json({ message: "Failed to delete ornament", error: err.message });
   }
 };
+
 
 
 
